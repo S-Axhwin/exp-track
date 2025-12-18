@@ -144,7 +144,7 @@ export default function Welcome() {
 
   const handleComplete = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    router.push('/onboarding/reminders');
+    router.push('/onboarding/signup');
   };
 
   const gesture = Gesture.Pan()

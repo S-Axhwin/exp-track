@@ -228,60 +228,56 @@ export default function Today() {
             <View className='w-full h-full rounded-3xl' style={styles.glow} />
           </Animated.View>
 
-          <View className='bg-card rounded-3xl p-8 border border-border items-center justify-center' style={{ minHeight: 280 }}>
-            {/* Large Category Icon */}
-            <View className='items-center justify-center mb-4'>
-              <View 
-                className='w-32 h-32 rounded-3xl items-center justify-center mb-4'
-                style={{ backgroundColor: 'rgba(255, 107, 107, 0.15)' }}
-              >
-                <Text style={{ fontSize: 80 }}>🍔</Text>
-              </View>
-              
-              {/* Category Name */}
-              <Text className='text-5xl font-bold text-foreground'>
-                Food
-              </Text>
-            </View>
-            
-            {/* Small category selector dots/pills below */}
-            <View className='flex-row mt-6 gap-2'>
-              {categories.map((cat, index) => (
+          <View className='bg-card rounded-3xl p-5 border border-border overflow-hidden'>
+            <View className='flex-row flex-wrap justify-around'>
+              {categories.map((category) => (
                 <TouchableOpacity
-                  key={cat.name}
-                  className='w-10 h-10 rounded-full items-center justify-center'
-                  style={{ 
-                    backgroundColor: index === 0 ? cat.color + '30' : '#888' + '20'
-                  }}
+                  key={category.name}
+                  className='items-center mb-3'
+                  style={{ width: '30%' }}
                 >
-                  <Text style={{ fontSize: 18 }}>{cat.icon}</Text>
+                  <View
+                    className='w-14 h-14 rounded-2xl items-center justify-center mb-2'
+                    style={{ backgroundColor: category.color + '20' }}
+                  >
+                    <Text style={{ fontSize: 28 }}>{category.icon}</Text>
+                  </View>
+                  <Text className='text-xs text-muted-foreground'>{category.name}</Text>
                 </TouchableOpacity>
               ))}
             </View>
           </View>
         </Animated.View>
 
-        {/* Input with Blue Border */}
-        <Animated.View entering={FadeIn.delay(400).duration(600)} className='mb-5'>
-          <View className='flex-row items-center bg-card rounded-full px-5 py-4 border-2' style={{ borderColor: '#3b82f6' }}>
+        {/* Animated Input with Circular Button */}
+        <Animated.View entering={FadeIn.delay(400).duration(600)} className='relative mb-5'>
+          {/* Glow effect for input */}
+          <Animated.View
+            style={[glowStyle, styles.glowContainer]}
+            className='absolute inset-0 rounded-full'
+          >
+            <View className='w-full h-full rounded-full' style={styles.inputGlow} />
+          </Animated.View>
+
+          <View className='flex-row items-center bg-card rounded-full px-5 py-4 border border-border'>
             <TextInput
               className='flex-1 text-foreground text-base mr-3'
-              placeholder='spent 200 for movie'
+              placeholder='spent 200 at shawak'
               placeholderTextColor='#888'
               value={inputText}
               onChangeText={setInputText}
               onSubmitEditing={handlePredict}
             />
             <TouchableOpacity
-              className='w-12 h-12 rounded-full items-center justify-center'
-              style={{ backgroundColor: '#d4d4d8' }}
+              className='w-12 h-12 rounded-full bg-primary items-center justify-center shadow-lg'
               onPress={handlePredict}
               disabled={isLoading}
+              style={styles.buttonShadow}
             >
               {isLoading ? (
-                <ActivityIndicator color='#888' size='small' />
+                <ActivityIndicator color='#fff' size='small' />
               ) : (
-                <View className='w-8 h-8 rounded-full' style={{ backgroundColor: '#a1a1aa' }} />
+                <Text className='text-white text-xl font-bold'>→</Text>
               )}
             </TouchableOpacity>
           </View>

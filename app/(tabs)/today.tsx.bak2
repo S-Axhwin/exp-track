@@ -261,27 +261,35 @@ export default function Today() {
           </View>
         </Animated.View>
 
-        {/* Input with Blue Border */}
-        <Animated.View entering={FadeIn.delay(400).duration(600)} className='mb-5'>
-          <View className='flex-row items-center bg-card rounded-full px-5 py-4 border-2' style={{ borderColor: '#3b82f6' }}>
+        {/* Animated Input with Circular Button */}
+        <Animated.View entering={FadeIn.delay(400).duration(600)} className='relative mb-5'>
+          {/* Glow effect for input */}
+          <Animated.View
+            style={[glowStyle, styles.glowContainer]}
+            className='absolute inset-0 rounded-full'
+          >
+            <View className='w-full h-full rounded-full' style={styles.inputGlow} />
+          </Animated.View>
+
+          <View className='flex-row items-center bg-card rounded-full px-5 py-4 border border-border'>
             <TextInput
               className='flex-1 text-foreground text-base mr-3'
-              placeholder='spent 200 for movie'
+              placeholder='spent 200 at shawak'
               placeholderTextColor='#888'
               value={inputText}
               onChangeText={setInputText}
               onSubmitEditing={handlePredict}
             />
             <TouchableOpacity
-              className='w-12 h-12 rounded-full items-center justify-center'
-              style={{ backgroundColor: '#d4d4d8' }}
+              className='w-12 h-12 rounded-full bg-primary items-center justify-center shadow-lg'
               onPress={handlePredict}
               disabled={isLoading}
+              style={styles.buttonShadow}
             >
               {isLoading ? (
-                <ActivityIndicator color='#888' size='small' />
+                <ActivityIndicator color='#fff' size='small' />
               ) : (
-                <View className='w-8 h-8 rounded-full' style={{ backgroundColor: '#a1a1aa' }} />
+                <Text className='text-white text-xl font-bold'>→</Text>
               )}
             </TouchableOpacity>
           </View>
