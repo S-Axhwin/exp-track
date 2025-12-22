@@ -1,492 +1,506 @@
-import React, { useEffect } from 'react';
-import { Text, View, TextInput, TouchableOpacity, ActivityIndicator, Alert, ScrollView, StyleSheet } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import axios from 'axios';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withRepeat,
-  withTiming,
-  withSpring,
-  Easing,
-  interpolate,
-  FadeIn,
-  FadeOut,
-  SlideInDown,
-  SlideOutDown,
-} from 'react-native-reanimated';
+import React, { useEffect, useMemo } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, Image, Dimensions, FlatList } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import Svg, { Circle } from 'react-native-svg';
 
-const API_URL = 'http://10.20.110.68:5001';
+import Animated, { FadeInDown, FadeIn, useSharedValue, useAnimatedStyle, withTiming, withRepeat, withSequence, useAnimatedScrollHandler, runOnJS, interpolate, Extrapolation, useDerivedValue, scrollTo, useAnimatedRef, interpolateColor, useAnimatedReaction } from 'react-native-reanimated';
+import * as Haptics from 'expo-haptics';
+import { ScreenReveal } from "../../components/ScreenReveal"
+import { useExpensesStore, selectTotalSpent, selectRemaining, selectDailyAverage, selectCategories } from '../../store/useExpensesStore';
 
-// Type definitions for the API response
-interface PredictionData {
-  amount: string | null;
-  date: string | null;
-  entity: string | null;
-  category: string;
-  confidence: number;
-  description: string;
-}
+const { width } = Dimensions.get('window');
+const ITEM_WIDTH = 50;
+const SPACING = 12;
+const SNAP_INTERVAL = ITEM_WIDTH + SPACING;
+const SIDE_SPACER = (width - ITEM_WIDTH) / 2;
 
-interface PredictionResponse {
-  success: boolean;
-  data: PredictionData | PredictionData[];
-  error?: string;
-}
+const DATES = Array.from({ length: 30 }, (_, i) => {
+  const date = new Date();
+  date.setDate(date.getDate() + (i - 15));
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
 
-/**
- * Predict expense from text using the ML API
- * @param text - Single text string or array of text strings
- * @returns Promise with prediction results
- */
-export const predictExpense = async (
-  text: string | string[]
-): Promise<PredictionResponse> => {
-  try {
-    const requestBody = Array.isArray(text) ? { texts: text } : { text };
+  const dateOnly = new Date(date);
+  dateOnly.setHours(0, 0, 0, 0);
 
-    const response = await axios.post<PredictionResponse>(
-      `${API_URL}/predict`,
-      requestBody,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      }
-    );
+  const isToday = date.toDateString() === today.toDateString();
+  const isFuture = dateOnly.getTime() > today.getTime();
 
-    return response.data;
-  } catch (error: unknown) {
-    if (axios.isAxiosError(error)) {
-      console.error('API Error:', error.response?.data || error.message);
-      return {
-        success: false,
-        data: Array.isArray(text) ? [] : {
-          amount: null,
-          date: null,
-          entity: null,
-          category: 'Unknown',
-          confidence: 0,
-          description: Array.isArray(text) ? '' : text,
-        },
-        error: error.response?.data?.error || error.message,
-      };
-    }
-    throw error;
-  }
-};
-
-const STORAGE_KEY = '@expenses';
-
-export default function Today() {
-  const [inputText, setInputText] = React.useState('');
-  const [isLoading, setIsLoading] = React.useState(false);
-  const [isSaving, setIsSaving] = React.useState(false);
-  const [prediction, setPrediction] = React.useState<PredictionData | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
-  const [showSuccess, setShowSuccess] = React.useState(false);
-
-  // Editable fields
-  const [editableAmount, setEditableAmount] = React.useState('');
-  const [editableCategory, setEditableCategory] = React.useState('');
-  const [editableEntity, setEditableEntity] = React.useState('');
-  const [editableDate, setEditableDate] = React.useState('');
-  const [editableDescription, setEditableDescription] = React.useState('');
-
-  const handleSave = async () => {
-    if (!editableAmount || !editableCategory) {
-      setError('Amount and Category are required');
-      return;
-    }
-
-    setIsSaving(true);
-    setError(null);
-
-    try {
-      const expense = {
-        id: Date.now().toString(),
-        amount: editableAmount,
-        category: editableCategory,
-        entity: editableEntity,
-        date: editableDate || new Date().toISOString().split('T')[0],
-        description: editableDescription,
-        confidence: prediction?.confidence || 0,
-        createdAt: new Date().toISOString(),
-      };
-
-      // Get existing expenses
-      const existingData = await AsyncStorage.getItem(STORAGE_KEY);
-      const expenses = existingData ? JSON.parse(existingData) : [];
-
-      // Add new expense
-      expenses.unshift(expense);
-
-      // Save back to storage
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(expenses));
-
-      // Show success and reset
-      setShowSuccess(true);
-      setTimeout(() => {
-        setShowSuccess(false);
-        setInputText('');
-        setPrediction(null);
-        setEditableAmount('');
-        setEditableCategory('');
-        setEditableEntity('');
-        setEditableDate('');
-        setEditableDescription('');
-      }, 2000);
-
-    } catch (err) {
-      setError('Failed to save expense');
-      console.error(err);
-    } finally {
-      setIsSaving(false);
-    }
+  return {
+    fullDate: date.toISOString().split('T')[0],
+    dayName: date.toLocaleDateString('en-US', { weekday: 'short' }),
+    dayNumber: date.getDate(),
+    monthName: date.toLocaleDateString('en-US', { month: 'short' }),
+    raw: date,
+    isToday,
+    isFuture
   };
+});
 
-  const handlePredict = async () => {
-    if (!inputText.trim()) {
-      setError('Please enter an expense description');
-      return;
-    }
+const INITIAL_INDEX = DATES.findIndex(date => date.isToday) !== -1 ? DATES.findIndex(date => date.isToday) : 15;
 
-    setIsLoading(true);
-    setError(null);
-    setPrediction(null);
+export default function Insights() {
+  const { transactions, fetchData, budget, isLoading } = useExpensesStore();
+  const [selectedDate, setSelectedDate] = React.useState(new Date().toISOString().split('T')[0]);
 
-    try {
-      const result = await predictExpense(inputText);
+  const scrollX = useSharedValue(1);
+  const flatListRef = useAnimatedRef<Animated.FlatList<any>>();
 
-      if (result.success && !Array.isArray(result.data)) {
-        setPrediction(result.data);
-        // Populate editable fields
-        setEditableAmount(result.data.amount || '');
-        setEditableCategory(result.data.category || '');
-        setEditableEntity(result.data.entity || '');
-        setEditableDate(result.data.date || '');
-        setEditableDescription(result.data.description || '');
-        setShowSuccess(false);
-      } else {
-        setError(result.error || 'Failed to get prediction');
+
+  useAnimatedReaction(
+    () => Math.round(scrollX.value / SNAP_INTERVAL),
+    (currentIndex, previousIndex) => {
+      if (currentIndex !== previousIndex) {
+        runOnJS(Haptics.selectionAsync)();
       }
-    } catch (err) {
-      setError('An unexpected error occurred');
-      console.error(err);
-    } finally {
-      setIsLoading(false);
     }
-  };
+  );
 
-  // Animated values
-  const glowAnimation = useSharedValue(0);
-  const rotationAnimation = useSharedValue(0);
-
-  useEffect(() => {
-    // Continuous glow animation
-    glowAnimation.value = withRepeat(
-      withTiming(1, { duration: 2000, easing: Easing.inOut(Easing.ease) }),
-      -1,
-      true
-    );
-
-    // Continuous rotation animation
-    rotationAnimation.value = withRepeat(
-      withTiming(360, { duration: 20000, easing: Easing.linear }),
-      -1,
-      false
-    );
-  }, []);
-
-  const glowStyle = useAnimatedStyle(() => {
-    const opacity = interpolate(glowAnimation.value, [0, 1], [0.3, 0.8]);
-    return {
-      opacity,
-    };
+  const onScroll = useAnimatedScrollHandler((event) => {
+    scrollX.value = event.contentOffset.x;
   });
 
-  // Category icons data
-  const categories = [
-    { name: 'Food', icon: '🍔', color: '#FF6B6B' },
-    { name: 'Transport', icon: '🚗', color: '#4ECDC4' },
-    { name: 'Shopping', icon: '🛍️', color: '#FFE66D' },
-    { name: 'Bills', icon: '💡', color: '#95E1D3' },
-    { name: 'Health', icon: '🏥', color: '#F38181' },
-    { name: 'Other', icon: '📦', color: '#AA96DA' },
-  ];
+
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter(transaction => {
+      const transactionDate = new Date(transaction.date);
+      const transactionDateString = transactionDate.getFullYear() + '-' +
+        String(transactionDate.getMonth() + 1).padStart(2, '0') + '-' +
+        String(transactionDate.getDate()).padStart(2, '0');
+
+      return transactionDateString === selectedDate;
+    });
+  }, [transactions, selectedDate]);
+
+
+  const dailyStats = useMemo(() => {
+    const total = filteredTransactions.reduce((sum, t) => sum + t.amount, 0);
+    const categoryBreakdown = filteredTransactions.reduce((acc, t) => {
+      const category = t.category || 'Other';
+      acc[category] = (acc[category] || 0) + t.amount;
+      return acc;
+    }, {} as Record<string, number>);
+
+    return {
+      total,
+      count: filteredTransactions.length,
+      categoryBreakdown
+    };
+  }, [filteredTransactions]);
+
+
+  const totalSpent = useExpensesStore(selectTotalSpent);
+  const remaining = useExpensesStore(selectRemaining);
+  const dailyAvg = useExpensesStore(selectDailyAverage);
+  const categories = useMemo(() => selectCategories({ transactions } as any), [transactions]);
+
+
+  const progressPercentage = Math.min(totalSpent / budget, 1);
+
+
+  const selectedDateInfo = DATES.find(d => d.fullDate === selectedDate);
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  if (isLoading) {
+    return <InsightsSkeleton />;
+  }
 
   return (
-    <ScrollView className='flex-1 bg-background'>
-      <View className='px-5 pt-8 pb-6'>
-        {/* Animated Category Icons Section */}
-        <Animated.View entering={FadeIn.duration(800)} className='relative mb-5'>
-          {/* Glow effect background */}
-          <Animated.View
-            style={[glowStyle, styles.glowContainer]}
-            className='absolute inset-0 rounded-3xl'
-          >
-            <View className='w-full h-full rounded-3xl' style={styles.glow} />
-          </Animated.View>
+    <ScreenReveal duration={1000}>
+      <View className="flex-1 bg-background">
+        <SafeAreaView edges={['top']} className="flex-1">
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
 
-          <View className='bg-card rounded-3xl p-8 border border-border items-center justify-center' style={{ minHeight: 280 }}>
-            {/* Large Category Icon */}
-            <View className='items-center justify-center mb-4'>
-              <View 
-                className='w-32 h-32 rounded-3xl items-center justify-center mb-4'
-                style={{ backgroundColor: 'rgba(255, 107, 107, 0.15)' }}
-              >
-                <Text style={{ fontSize: 80 }}>🍔</Text>
-              </View>
-              
-              {/* Category Name */}
-              <Text className='text-5xl font-bold text-foreground'>
-                Food
-              </Text>
-            </View>
-            
-            {/* Small category selector dots/pills below */}
-            <View className='flex-row mt-6 gap-2'>
-              {categories.map((cat, index) => (
-                <TouchableOpacity
-                  key={cat.name}
-                  className='w-10 h-10 rounded-full items-center justify-center'
-                  style={{ 
-                    backgroundColor: index === 0 ? cat.color + '30' : '#888' + '20'
-                  }}
-                >
-                  <Text style={{ fontSize: 18 }}>{cat.icon}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        </Animated.View>
 
-        {/* Input with Blue Border */}
-        <Animated.View entering={FadeIn.delay(400).duration(600)} className='mb-5'>
-          <View className='flex-row items-center bg-card rounded-full px-5 py-4 border-2' style={{ borderColor: '#3b82f6' }}>
-            <TextInput
-              className='flex-1 text-foreground text-base mr-3'
-              placeholder='spent 200 for movie'
-              placeholderTextColor='#888'
-              value={inputText}
-              onChangeText={setInputText}
-              onSubmitEditing={handlePredict}
-            />
-            <TouchableOpacity
-              className='w-12 h-12 rounded-full items-center justify-center'
-              style={{ backgroundColor: '#d4d4d8' }}
-              onPress={handlePredict}
-              disabled={isLoading}
+            <Animated.View
+              entering={FadeInDown.duration(600).springify()}
+              className="mx-4 bg-gray-900 rounded-[32px] p-6 mb-8"
             >
-              {isLoading ? (
-                <ActivityIndicator color='#888' size='small' />
-              ) : (
-                <View className='w-8 h-8 rounded-full' style={{ backgroundColor: '#a1a1aa' }} />
-              )}
-            </TouchableOpacity>
-          </View>
-        </Animated.View>
-
-        {/* Error Message */}
-        {error && (
-          <View className='bg-destructive/10 border border-destructive rounded-xl p-3 mb-4'>
-            <Text className='text-destructive font-medium text-sm'>{error}</Text>
-          </View>
-        )}
-
-        {/* Success Message */}
-        {showSuccess && (
-          <View className='bg-green-500/10 border border-green-500 rounded-xl p-3 mb-4'>
-            <Text className='text-green-500 font-medium text-center text-sm'>
-              ✓ Expense saved successfully!
-            </Text>
-          </View>
-        )}
-
-        {/* Large Animated Prediction Result Card */}
-        {prediction && (
-          <Animated.View
-            entering={SlideInDown.springify().damping(15)}
-            exiting={SlideOutDown}
-            className='bg-card rounded-3xl p-6 border border-border'
-          >
-            {/* Category */}
-            <View className='mb-5 pb-4 border-b border-border'>
-              <Text className='text-xs text-muted-foreground mb-2 uppercase tracking-wider'>
-                Category
+              <Text className="text-gray-400 text-lg mb-6">
+                Count Your <Text className="text-white font-bold">Monthly Budget</Text>
               </Text>
-              <TextInput
-                className='text-3xl font-bold text-foreground bg-background/50 rounded-xl px-4 py-3'
-                value={editableCategory}
-                onChangeText={setEditableCategory}
-                placeholder='Enter category'
-                placeholderTextColor='#888'
-              />
-            </View>
 
-            <View className='space-y-4 mb-5'>
-              {/* Amount */}
-              <View className='mb-4'>
-                <Text className='text-xs text-muted-foreground mb-2 uppercase tracking-wider'>
-                  Amount
-                </Text>
-                <View className='flex-row items-center bg-background/50 rounded-xl px-4 py-3'>
-                  <Text className='text-2xl font-bold text-foreground mr-2'>₹</Text>
-                  <TextInput
-                    className='text-2xl font-bold text-foreground flex-1'
-                    value={editableAmount}
-                    onChangeText={setEditableAmount}
-                    placeholder='0'
-                    placeholderTextColor='#888'
-                    keyboardType='numeric'
-                  />
+              <View className="flex-row items-center justify-between mb-8">
+
+                <View className="items-center">
+                  <View className="h-10 justify-end mb-2">
+                    <View className="flex-row h-full items-end gap-[2px]">
+                      <View className="w-1 h-3 bg-gray-700 rounded-full" />
+                      <View className="w-1 h-5 bg-gray-600 rounded-full" />
+                      <View className="w-1 h-2 bg-gray-700 rounded-full" />
+                      <View className="w-1 h-6 bg-gray-500 rounded-full" />
+                    </View>
+                  </View>
+                  <Text className="text-gray-400 text-[10px] uppercase font-bold mb-1">SPENT</Text>
+                  <Text className="text-white text-base font-bold">₹{totalSpent.toLocaleString()}</Text>
+                </View>
+
+                {/* Center Circle */}
+                <View className="items-center justify-center">
+                  <Svg height="140" width="140" viewBox="0 0 140 140">
+                    <Circle
+                      cx="70"
+                      cy="70"
+                      r="60"
+                      stroke="#374151"
+                      strokeWidth="12"
+                      fill="transparent"
+                    />
+                    <Circle
+                      cx="70"
+                      cy="70"
+                      r="60"
+                      stroke="#EAB308"
+                      strokeWidth="12"
+                      fill="transparent"
+                      strokeDasharray="377"
+                      strokeDashoffset={377 * (1 - progressPercentage)}
+                      strokeLinecap="round"
+                      rotation="-90"
+                      origin="70, 70"
+                    />
+                    <Circle cx="70" cy="70" r="50" fill="#EAB308" />
+                  </Svg>
+                  <View className="absolute items-center">
+                    <Text className="text-gray-900 text-3xl font-extrabold">{(remaining / 1000).toFixed(1)}k</Text>
+                    <Text className="text-gray-900 text-[10px] font-bold opacity-80 uppercase">RES. BUDGET</Text>
+                  </View>
+                </View>
+
+
+                <View className="items-center">
+                  <View className="h-10 justify-end mb-2">
+                    <View className="flex-row h-full items-end gap-[2px]">
+                      <View className="w-1 h-4 bg-gray-700 rounded-full" />
+                      <View className="w-1 h-2 bg-gray-700 rounded-full" />
+                      <View className="w-1 h-6 bg-gray-500 rounded-full" />
+                      <View className="w-1 h-3 bg-gray-700 rounded-full" />
+                    </View>
+                  </View>
+                  <Text className="text-gray-400 text-[10px] uppercase font-bold mb-1">DAILY AVG</Text>
+                  <Text className="text-white text-base font-bold">₹{dailyAvg.toLocaleString()}</Text>
+                </View>
+              </View>
+            </Animated.View>
+
+
+            <Animated.View
+              key={selectedDate}
+              entering={FadeIn.duration(300)}
+              className="mx-4 mb-6 bg-gradient-to-br from-yellow-400 to-yellow-500 rounded-[28px] p-6"
+            >
+              <View className="flex-row items-center justify-between mb-4">
+                <View>
+                  <Text className="text-gray-900 text-sm font-semibold opacity-70">
+                    {selectedDateInfo?.isToday ? 'Today' : `${selectedDateInfo?.dayName}, ${selectedDateInfo?.monthName} ${selectedDateInfo?.dayNumber}`}
+                  </Text>
+                  <Text className="text-gray-900 text-3xl font-extrabold mt-1">
+                    ₹{dailyStats.total.toLocaleString()}
+                  </Text>
+                  <Text className="text-gray-900 text-xs font-semibold opacity-60 mt-1">
+                    {dailyStats.count} {dailyStats.count === 1 ? 'transaction' : 'transactions'}
+                  </Text>
+                </View>
+
+
+                <View className="items-end">
+                  <View className="bg-gray-900/20 rounded-full px-4 py-2">
+                    <Text className="text-gray-900 text-xs font-bold">
+                      {dailyStats.total > 0 ? `${((dailyStats.total / budget) * 100).toFixed(1)}%` : '0%'}
+                    </Text>
+                    <Text className="text-gray-900 text-[9px] font-semibold opacity-60">of budget</Text>
+                  </View>
                 </View>
               </View>
 
-              {/* Entity */}
-              <View className='mb-4'>
-                <Text className='text-xs text-muted-foreground mb-2 uppercase tracking-wider'>
-                  Item/Service
-                </Text>
-                <TextInput
-                  className='text-lg font-semibold text-foreground bg-background/50 rounded-xl px-4 py-3'
-                  value={editableEntity}
-                  onChangeText={setEditableEntity}
-                  placeholder='What was purchased?'
-                  placeholderTextColor='#888'
-                />
-              </View>
 
-              {/* Date */}
-              <View className='mb-4'>
-                <Text className='text-xs text-muted-foreground mb-2 uppercase tracking-wider'>
-                  Date
-                </Text>
-                <TextInput
-                  className='text-lg font-semibold text-foreground bg-background/50 rounded-xl px-4 py-3'
-                  value={editableDate}
-                  onChangeText={setEditableDate}
-                  placeholder='YYYY-MM-DD'
-                  placeholderTextColor='#888'
-                />
-              </View>
-
-              {/* Description */}
-              <View className='mb-4'>
-                <Text className='text-xs text-muted-foreground mb-2 uppercase tracking-wider'>
-                  Notes
-                </Text>
-                <TextInput
-                  className='text-foreground bg-background/50 rounded-xl px-4 py-3 min-h-[60px]'
-                  value={editableDescription}
-                  onChangeText={setEditableDescription}
-                  placeholder='Add notes...'
-                  placeholderTextColor='#888'
-                  multiline
-                />
-              </View>
-            </View>
-
-            {/* Confidence Badge */}
-            <View className='flex-row justify-center mb-5'>
-              <View className='bg-primary/20 rounded-full px-5 py-2'>
-                <Text className='text-primary font-bold text-sm'>
-                  {(prediction.confidence * 100).toFixed(1)}% Confidence
-                </Text>
-              </View>
-            </View>
-
-            {/* Confirm Button */}
-            <TouchableOpacity
-              className='bg-green-600 rounded-2xl py-4 items-center shadow-lg'
-              onPress={handleSave}
-              disabled={isSaving}
-            >
-              {isSaving ? (
-                <ActivityIndicator color='#fff' />
-              ) : (
-                <Text className='text-white font-bold text-lg'>
-                  ✓ Confirm & Save Expense
-                </Text>
+              {Object.keys(dailyStats.categoryBreakdown).length > 0 && (
+                <View className="flex-row flex-wrap gap-2">
+                  {Object.entries(dailyStats.categoryBreakdown).map(([category, amount]) => (
+                    <View key={category} className="bg-gray-900/20 rounded-full px-3 py-1.5">
+                      <Text className="text-gray-900 text-xs font-bold">
+                        {category}: ₹{amount}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
               )}
-            </TouchableOpacity>
-          </Animated.View>
-        )}
+
+              {dailyStats.total === 0 && (
+                <View className="items-center py-2">
+                  <Text className="text-gray-900 text-sm font-semibold opacity-60">
+                    No expenses recorded
+                  </Text>
+                </View>
+              )}
+            </Animated.View>
+
+
+            <View className="mb-6">
+              <View
+                pointerEvents="none"
+                className="absolute bg-yellow-500 rounded-full h-[60px] w-[50px] z-0"
+                style={{
+                  left: SIDE_SPACER,
+                  top: 2,
+                }}
+              />
+
+              <Animated.FlatList
+                ref={flatListRef}
+                horizontal
+                data={DATES}
+                keyExtractor={(item) => item.fullDate}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingHorizontal: SIDE_SPACER, gap: SPACING }}
+                snapToInterval={SNAP_INTERVAL}
+                decelerationRate="fast"
+                onScroll={onScroll}
+                scrollEventThrottle={16}
+                initialScrollIndex={INITIAL_INDEX}
+                getItemLayout={(data, index) => (
+                  { length: SNAP_INTERVAL, offset: SNAP_INTERVAL * index, index }
+                )}
+                onMomentumScrollEnd={(event) => {
+                  const index = Math.round(event.nativeEvent.contentOffset.x / SNAP_INTERVAL);
+                  const item = DATES[index];
+                  if (item && !item.isFuture) {
+                    setSelectedDate(item.fullDate);
+                  }
+                }}
+                renderItem={({ item, index }) => {
+                  return (
+                    <CalendarItem
+                      item={item}
+                      index={index}
+                      scrollX={scrollX}
+                      onPress={() => {
+                        if (!item.isFuture) {
+                          setSelectedDate(item.fullDate);
+                          flatListRef.current?.scrollToIndex({ index, animated: true });
+                        }
+                      }}
+                    />
+                  );
+                }}
+              />
+            </View>
+
+
+
+            <View className="px-4 gap-4">
+              {filteredTransactions.length > 0 ? (
+                filteredTransactions.map((item, i) => (
+                  <Animated.View
+                    key={item.id}
+                    entering={FadeInDown.delay(50 * (i + 1)).springify()}
+                    className="bg-white p-4 rounded-[20px] shadow-sm flex-row items-center border border-gray-100"
+                  >
+                    <View className={`w-12 h-12 rounded-full items-center justify-center mr-4 ${item.color}`}>
+                      <Text className="text-xl">
+                        {item.icon}
+                      </Text>
+                    </View>
+                    <View className="flex-1">
+                      <Text className="text-lg font-bold text-gray-900">{item.name}</Text>
+                      <Text className="text-gray-400 text-xs">{new Date(item.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+                    </View>
+                    <View>
+                      <Text className="font-bold text-gray-900">₹{item.amount.toLocaleString()}</Text>
+                    </View>
+                  </Animated.View>
+                ))
+              ) : (
+                <View className="items-center py-12">
+                  <View className="w-20 h-20 rounded-full bg-gray-100 items-center justify-center mb-4">
+                    <Text className="text-4xl">📭</Text>
+                  </View>
+                  <Text className="text-gray-900 font-bold text-lg mb-1">No transactions yet</Text>
+                  <Text className="text-gray-400 text-sm">
+                    {selectedDateInfo?.isFuture ? 'Future date selected' : 'No expenses recorded for this day'}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+          </ScrollView>
+        </SafeAreaView>
       </View>
-    </ScrollView>
+    </ScreenReveal>
   );
 }
 
-// Animated Category Card Component
-const CategoryCard = ({ category, delay }: { category: { name: string; icon: string; color: string }; delay: number }) => {
-  const scale = useSharedValue(0);
-  const rotate = useSharedValue(0);
+
+
+const CalendarItem = ({ item, index, scrollX, onPress }: any) => {
+  const rAnimatedStyle = useAnimatedStyle(() => {
+    const inputRange = [
+      (index - 1) * SNAP_INTERVAL,
+      index * SNAP_INTERVAL,
+      (index + 1) * SNAP_INTERVAL,
+    ];
+
+    const scale = interpolate(
+      scrollX.value,
+      inputRange,
+      [0.8, 1.2, 0.8],
+      Extrapolation.CLAMP
+    );
+
+    return {
+      transform: [{ scale }],
+    };
+  });
+
+  const rTextStyle = useAnimatedStyle(() => {
+    const inputRange = [
+      (index - 0.5) * SNAP_INTERVAL,
+      index * SNAP_INTERVAL,
+      (index + 0.5) * SNAP_INTERVAL,
+    ];
+
+    const color = interpolateColor(
+      scrollX.value,
+      inputRange,
+      ['rgb(156, 163, 175)', 'rgb(255, 255, 255)', 'rgb(156, 163, 175)']
+    );
+
+    return { color };
+  });
+
+  const rDayNumberStyle = useAnimatedStyle(() => {
+    const inputRange = [
+      (index - 0.5) * SNAP_INTERVAL,
+      index * SNAP_INTERVAL,
+      (index + 0.5) * SNAP_INTERVAL,
+    ];
+
+    const color = interpolateColor(
+      scrollX.value,
+      inputRange,
+      ['rgb(17, 24, 39)', 'rgb(255, 255, 255)', 'rgb(17, 24, 39)']
+    );
+
+    return { color };
+  });
+
+  return (
+    <TouchableOpacity onPress={onPress} disabled={item.isFuture} activeOpacity={0.7}>
+      <Animated.View
+        style={[rAnimatedStyle, { opacity: item.isFuture ? 0.3 : 1 }]}
+        className="items-center justify-center w-[50px] py-3 rounded-full gap-1 bg-transparent"
+      >
+        <Animated.Text style={rTextStyle} className="text-xs font-bold">
+          {item.dayName}
+        </Animated.Text>
+        <Animated.Text style={rDayNumberStyle} className="text-sm font-bold">
+          {item.dayNumber}
+        </Animated.Text>
+
+
+        {item.isToday && (
+          <View className="w-1 h-1 rounded-full bg-white absolute bottom-2" />
+        )}
+      </Animated.View>
+    </TouchableOpacity>
+  )
+}
+
+const Skeleton = ({ className, style }: { className?: string, style?: any }) => {
+  const opacity = useSharedValue(0.3);
 
   useEffect(() => {
-    scale.value = withSpring(1, { damping: 10 });
-    rotate.value = withRepeat(
-      withTiming(5, { duration: 2000, easing: Easing.inOut(Easing.ease) }),
+    opacity.value = withRepeat(
+      withSequence(
+        withTiming(0.7, { duration: 800 }),
+        withTiming(0.3, { duration: 800 })
+      ),
       -1,
       true
     );
   }, []);
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [
-      { scale: scale.value },
-      { rotate: `${rotate.value}deg` }
-    ],
-  }));
+  const animatedStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
 
   return (
     <Animated.View
-      entering={FadeIn.delay(delay).springify()}
-      style={{ width: '30%' }}
-      className='items-center mb-3'
-    >
-      <TouchableOpacity activeOpacity={0.7}>
-        <Animated.View
-          style={[animatedStyle]}
-          className='w-14 h-14 rounded-2xl items-center justify-center mb-2'
-        >
-          <View
-            className='w-full h-full rounded-2xl items-center justify-center'
-            style={{ backgroundColor: category.color + '20' }}
-          >
-            <Text style={{ fontSize: 28 }}>{category.icon}</Text>
-          </View>
-        </Animated.View>
-        <Text className='text-xs text-muted-foreground text-center'>{category.name}</Text>
-      </TouchableOpacity>
-    </Animated.View>
+      className={`bg-gray-300 rounded-lg ${className}`}
+      style={[style, animatedStyle]}
+    />
   );
 };
 
-const styles = StyleSheet.create({
-  glowContainer: {
-    zIndex: -1,
-  },
-  glow: {
-    backgroundColor: 'rgba(99, 102, 241, 0.2)',
-    shadowColor: '#6366f1',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 20,
-    elevation: 10,
-  },
-  inputGlow: {
-    backgroundColor: 'rgba(139, 92, 246, 0.15)',
-    shadowColor: '#8b5cf6',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.6,
-    shadowRadius: 15,
-    elevation: 8,
-  },
-  buttonShadow: {
-    shadowColor: '#6366f1',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-});
+const InsightsSkeleton = () => {
+  return (
+    <View className="flex-1 bg-background">
+      <SafeAreaView edges={['top']} className="flex-1">
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
+
+
+          <View className="mx-4 bg-gray-900 rounded-[32px] p-6 mb-8 h-[360px]">
+
+            <Skeleton className="w-48 h-6 bg-gray-700 mb-6" />
+
+
+            <View className="flex-row justify-between items-center mb-8">
+              <View>
+                <Skeleton className="w-10 h-10 bg-gray-700 mb-2" />
+                <Skeleton className="w-12 h-3 bg-gray-700" />
+              </View>
+
+
+              <View className="items-center">
+                <View className="w-[140px] h-[140px] rounded-full border-[12px] border-gray-800 items-center justify-center">
+                  <Skeleton className="w-20 h-8 bg-gray-700 mb-1" />
+                  <Skeleton className="w-16 h-3 bg-gray-700" />
+                </View>
+              </View>
+
+              <View>
+                <Skeleton className="w-10 h-10 bg-gray-700 mb-2" />
+                <Skeleton className="w-12 h-3 bg-gray-700" />
+              </View>
+            </View>
+
+
+            <View className="flex-row gap-3">
+              {[1, 2, 3].map(i => (
+                <Skeleton key={i} className="flex-1 h-32 rounded-[24px] bg-gray-800" />
+              ))}
+            </View>
+          </View>
+
+
+          <View className="mb-6 px-4 flex-row gap-3 overflow-hidden">
+            {[1, 2, 3, 4, 5, 6].map(i => (
+              <Skeleton key={i} className="w-[50px] h-[70px] rounded-full" />
+            ))}
+          </View>
+
+
+          <View className="mx-4 mb-6">
+            <Skeleton className="h-32 rounded-[28px]" />
+          </View>
+
+
+          <View className="px-4 gap-4">
+            {[1, 2, 3].map(i => (
+              <View key={i} className="flex-row items-center gap-4">
+                <Skeleton className="w-12 h-12 rounded-full" />
+                <View className="flex-1 gap-2">
+                  <Skeleton className="w-32 h-4" />
+                  <Skeleton className="w-20 h-3" />
+                </View>
+                <Skeleton className="w-16 h-5" />
+              </View>
+            ))}
+          </View>
+
+        </ScrollView>
+      </SafeAreaView>
+    </View>
+  );
+};

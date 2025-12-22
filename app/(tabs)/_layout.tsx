@@ -13,14 +13,13 @@ export default function TabsLayout() {
           headerShown: false,
         }}
         tabBar={(props) => <TabBarDemo {...props} />}
-        
       >
         <Tabs.Screen
           name="today"
           options={{
             tabBarLabel: 'Today',
             tabBarIcon: ({ color, size }) => (
-              <CalendarAdd color={color} size={size} />
+              <Graph color={color} size={size} />
             ),
           }}
         />
@@ -33,10 +32,22 @@ export default function TabsLayout() {
             ),
           }}
         />
+
         <Tabs.Screen
           name="settings"
           options={{
+            href: null,
             tabBarLabel: 'Settings',
+            tabBarIcon: ({ color, size }) => (
+              <Setting color={color} size={size} />
+            ),
+          }}
+        />
+
+        <Tabs.Screen
+          name="categoires"
+          options={{
+            tabBarLabel: 'Categories',
             tabBarIcon: ({ color, size }) => (
               <Setting color={color} size={size} />
             ),

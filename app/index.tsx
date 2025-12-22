@@ -14,7 +14,7 @@ export default function Index() {
   if (isNewUser === null) return null; // splash/loading
 
   // if (isNewUser) {
-    return <Redirect href="/onboarding/welcome" />;
+  return <Redirect href="/onboarding/welcome" />;
   // }
 
   return <Redirect href="/(tabs)/today" />;
